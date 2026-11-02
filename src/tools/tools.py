@@ -23,14 +23,16 @@ def web_search(query: str) -> str:
     Returns:
         str: The results of the search.
     """ 
-    results = tavily.search(query=query, max_results=5)
-
-    out = []
-
-    for r in results.get("results", []):
-        out.append(f"Title: {r['title']}\n URL: {r['url']}\n Content: {r['content'][:300]}\n")     
+    try:
+        results = tavily.search(query=query, max_results=5)
+        out = []
+        for r in results.get("results", []):
+            out.append(f"Title: {r['title']}\n URL: {r['url']}\n Content: {r['content'][:300]}\n")     
+        
+        return "\n----\n".join(out) if out else "No search results found."
+    except Exception as e:
+        return f"Error executing web search: {str(e)}"
     
-    return "\n----\n".join(out)       
     
 @tool    
 def scrape_url(url: str) -> str:
