@@ -11,8 +11,8 @@ from src.pipelines.pipelines import run_research_pipeline
 # Page Configuration
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Multi-Agent AI Research Studio",
-    page_icon="🔬",
+    page_title="DeepSearch — Autonomous AI Research",
+    page_icon="🔍",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -82,6 +82,28 @@ st.markdown(
         color: #777;
     }
 
+    /* URL Citation Card */
+    .sources-box {
+        background: rgba(30, 136, 229, 0.05);
+        border: 1px solid rgba(30, 136, 229, 0.2);
+        border-radius: 8px;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    .source-tag {
+        display: inline-block;
+        background: rgba(30, 136, 229, 0.12);
+        color: #1E88E5;
+        padding: 4px 10px;
+        border-radius: 15px;
+        font-size: 0.85rem;
+        margin: 3px 4px;
+        text-decoration: none;
+    }
+    .source-tag:hover {
+        background: rgba(30, 136, 229, 0.25);
+    }
+
     /* Critic Evaluation Card */
     .critic-card {
         border-left: 4px solid #E53935;
@@ -125,42 +147,33 @@ def extract_critic_score(feedback_text: str) -> str:
 
 
 # -----------------------------------------------------------------------------
-# Sidebar: Setup, Agents Overview, & Templates
+# Sidebar: Setup, Agents Overview, & Templates (NO API KEYS EXPOSED)
 # -----------------------------------------------------------------------------
 with st.sidebar:
-    st.markdown("### 🔬 Multi-Agent Studio")
-    st.caption("Orchestrated research pipeline powered by LangChain & Google Gemini")
+    st.markdown("### 🔍 DeepSearch")
+    st.caption("Autonomous multi-agent research powered by LangChain & Google Gemini")
     st.divider()
 
-    # Environment Status
-    st.markdown("#### 🔑 System Status")
-    google_key = os.getenv("GOOGLE_API_KEY", "")
-    tavily_key = os.getenv("TAVILY_API_KEY", "")
+    # System Status (Privacy-preserving: never display API keys)
+    st.markdown("#### 🛡️ System Status")
+    google_configured = bool(os.getenv("GOOGLE_API_KEY"))
+    tavily_configured = bool(os.getenv("TAVILY_API_KEY"))
 
     col_g, col_t = st.columns(2)
     with col_g:
-        if google_key:
+        if google_configured:
             st.success("Google AI\nReady", icon="🟢")
         else:
             st.error("Google AI\nMissing", icon="🔴")
 
     with col_t:
-        if tavily_key:
+        if tavily_configured:
             st.success("Tavily\nReady", icon="🟢")
         else:
             st.error("Tavily\nMissing", icon="🔴")
 
-    # API Key Override Expander
-    with st.expander("⚙️ Configure API Keys"):
-        new_g_key = st.text_input("GOOGLE_API_KEY", value=google_key, type="password")
-        new_t_key = st.text_input("TAVILY_API_KEY", value=tavily_key, type="password")
-        if st.button("Save Keys", use_container_width=True):
-            if new_g_key:
-                os.environ["GOOGLE_API_KEY"] = new_g_key
-            if new_t_key:
-                os.environ["TAVILY_API_KEY"] = new_t_key
-            st.success("API Keys updated in runtime!")
-            st.rerun()
+    if not (google_configured and tavily_configured):
+        st.warning("⚠️ Ensure GOOGLE_API_KEY and TAVILY_API_KEY are configured in your `.env` file.")
 
     st.divider()
 
@@ -170,19 +183,19 @@ with st.sidebar:
         """
         <div class="agent-card">
             <div class="agent-title">🔍 1. Search Agent</div>
-            <div class="agent-desc">Queries Tavily for fresh, reliable search snippets and source links.</div>
+            <div class="agent-desc">Queries Tavily for live sources & URLs.</div>
         </div>
         <div class="agent-card">
             <div class="agent-title">📖 2. Reader Agent</div>
-            <div class="agent-desc">Scrapes and extracts full article text using Trafilatura & Readability.</div>
+            <div class="agent-desc">Scrapes deep content from the most relevant URL.</div>
         </div>
         <div class="agent-card">
             <div class="agent-title">✍️ 3. Writer Agent</div>
-            <div class="agent-desc">Synthesizes findings into a professional, structured research report.</div>
+            <div class="agent-desc">Synthesizes report and cites all discovered URLs.</div>
         </div>
         <div class="agent-card">
             <div class="agent-title">🧐 4. Critic Agent</div>
-            <div class="agent-desc">Peer-reviews content, scores depth, and points out gaps.</div>
+            <div class="agent-desc">Audits factual depth, citations, and scores quality.</div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -210,9 +223,9 @@ with st.sidebar:
 # -----------------------------------------------------------------------------
 # Main Interface
 # -----------------------------------------------------------------------------
-st.markdown('<div class="hero-title">🔬 Autonomous Research Multi-Agent Team</div>', unsafe_allow_html=True)
+st.markdown('<div class="hero-title">🔍 DeepSearch</div>', unsafe_allow_html=True)
 st.markdown(
-    '<div class="hero-subtitle">Enter any research inquiry to dispatch a coordinated team of autonomous agents to search, read, synthesize, and peer-critique a complete dossier.</div>',
+    '<div class="hero-subtitle">Autonomous Multi-Agent Research System — Discover sources, scrape in-depth content, synthesize reports, and peer-review findings.</div>',
     unsafe_allow_html=True,
 )
 
@@ -241,9 +254,9 @@ if run_button:
     if not topic_input.strip():
         st.warning("Please enter a research topic to begin.")
     elif not os.getenv("GOOGLE_API_KEY"):
-        st.error("Missing Google API Key. Please configure it in the sidebar or in your .env file.")
+        st.error("Missing GOOGLE_API_KEY in .env file.")
     elif not os.getenv("TAVILY_API_KEY"):
-        st.error("Missing Tavily API Key. Please configure it in the sidebar or in your .env file.")
+        st.error("Missing TAVILY_API_KEY in .env file.")
     else:
         st.session_state.research_topic = topic_input.strip()
 
@@ -256,21 +269,24 @@ if run_button:
             "critic": progress_box.empty(),
         }
 
-        step_placeholders["search"].markdown("⏳ **Step 1:** Search Agent is querying the web...")
+        step_placeholders["search"].markdown("⏳ **Step 1:** Search Agent is querying Tavily for web sources & URLs...")
         start_time = time.time()
 
-        def on_step_update(step_id: str, content: str):
+        def on_step_update(step_id: str, content: str, **kwargs):
             if step_id == "search":
-                step_placeholders["search"].markdown("✅ **Step 1:** Search Agent gathered live intelligence!")
-                step_placeholders["reader"].markdown("⏳ **Step 2:** Reader Agent is selecting and scraping URLs...")
+                urls_found = kwargs.get("urls", [])
+                count = len(urls_found)
+                step_placeholders["search"].markdown(f"✅ **Step 1:** Search Agent discovered **{count} source URLs**!")
+                step_placeholders["reader"].markdown("⏳ **Step 2:** Reader Agent is selecting and scraping the best URL...")
             elif step_id == "reader":
-                step_placeholders["reader"].markdown("✅ **Step 2:** Reader Agent extracted deep article content!")
-                step_placeholders["writer"].markdown("⏳ **Step 3:** Writer Agent is synthesizing research report...")
+                scraped_url = kwargs.get("scraped_url", "Webpage")
+                step_placeholders["reader"].markdown(f"✅ **Step 2:** Reader Agent scraped content from `{scraped_url}`!")
+                step_placeholders["writer"].markdown("⏳ **Step 3:** Writer Agent is synthesizing report with citations...")
             elif step_id == "writer":
-                step_placeholders["writer"].markdown("✅ **Step 3:** Writer Agent produced structured report!")
-                step_placeholders["critic"].markdown("⏳ **Step 4:** Critic Agent is auditing and scoring...")
+                step_placeholders["writer"].markdown("✅ **Step 3:** Writer Agent completed report with reference URLs!")
+                step_placeholders["critic"].markdown("⏳ **Step 4:** Critic Agent is reviewing and scoring...")
             elif step_id == "critic":
-                step_placeholders["critic"].markdown("✅ **Step 4:** Critic Agent finalized peer evaluation!")
+                step_placeholders["critic"].markdown("✅ **Step 4:** Critic Agent completed evaluation!")
 
         try:
             results = run_research_pipeline(
@@ -300,6 +316,8 @@ if st.session_state.pipeline_results:
     critic_text = results.get("feedback", "")
     search_text = results.get("search_results", "")
     scraped_text = results.get("scraped_content", "")
+    tavily_urls = results.get("tavily_urls", [])
+    scraped_url = results.get("scraped_url", "")
 
     # Top Metrics Bar
     word_count = len(report_text.split()) if report_text else 0
@@ -331,36 +349,44 @@ if st.session_state.pipeline_results:
         st.markdown(
             f"""
             <div class="metric-card">
-                <div class="metric-value">{critic_score}</div>
-                <div class="metric-label">Critic Score</div>
+                <div class="metric-value">{len(tavily_urls)}</div>
+                <div class="metric-label">URLs Discovered</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
     with m4:
         st.markdown(
-            """
+            f"""
             <div class="metric-card">
-                <div class="metric-value">4 / 4</div>
-                <div class="metric-label">Agents Coordinated</div>
+                <div class="metric-value">{critic_score}</div>
+                <div class="metric-label">Critic Score</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
 
     # Tabs for Outputs
-    tab_report, tab_critic, tab_search, tab_scraped = st.tabs(
+    tab_report, tab_sources, tab_critic, tab_search, tab_scraped = st.tabs(
         [
             "📑 Final Research Report",
+            "🔗 Source URLs & Provenance",
             "🧐 Critic Review & Audit",
             "🔍 Search Agent Intel",
             "📖 Reader Agent Scrape",
         ]
     )
 
+    # -------------------------------------------------------------------------
     # 1. Final Report Tab
+    # -------------------------------------------------------------------------
     with tab_report:
         st.subheader("📑 Synthesized Research Report")
+
+        # Sources summary banner at top of report
+        if scraped_url:
+            st.info(f"📍 **Deep-Scraped Primary Source:** [{scraped_url}]({scraped_url})")
+
         col_down, _ = st.columns([1, 4])
         with col_down:
             st.download_button(
@@ -373,7 +399,43 @@ if st.session_state.pipeline_results:
 
         st.markdown(report_text)
 
-    # 2. Critic Review Tab
+    # -------------------------------------------------------------------------
+    # 2. Source URLs & Provenance Tab
+    # -------------------------------------------------------------------------
+    with tab_sources:
+        st.subheader("🔗 Discovered & Scraped Source URLs")
+        st.caption("Complete breakdown of the URLs retrieved by Tavily and the primary page scraped by the Reader Agent.")
+
+        # Deep-Scraped Source Card
+        st.markdown("#### 🎯 Primary Deep-Scraped Source")
+        if scraped_url and scraped_url != "N/A":
+            st.markdown(
+                f"""
+                <div style="background: rgba(30,136,229,0.08); border-left: 4px solid #1E88E5; padding: 12px; border-radius: 6px; margin-bottom: 1.5rem;">
+                    <strong>Scraped URL:</strong> <a href="{scraped_url}" target="_blank" style="color: #1E88E5; word-break: break-all;">{scraped_url}</a>
+                    <br><small style="color: #888;">This webpage was selected by the Reader Agent for in-depth content extraction via Trafilatura.</small>
+                </div>
+                """,
+                unsafe_allow_html=True,
+            )
+        else:
+            st.write("No specific URL scraped.")
+
+        # Tavily Discovered URLs
+        st.markdown(f"#### 🌐 All URLs Discovered by Tavily Search ({len(tavily_urls)})")
+        if tavily_urls:
+            for idx, url in enumerate(tavily_urls, 1):
+                col_num, col_link = st.columns([1, 15])
+                with col_num:
+                    st.markdown(f"**{idx}.**")
+                with col_link:
+                    st.markdown(f"[{url}]({url})")
+        else:
+            st.write("No external URLs returned.")
+
+    # -------------------------------------------------------------------------
+    # 3. Critic Review Tab
+    # -------------------------------------------------------------------------
     with tab_critic:
         st.subheader("🧐 Peer Critique & Quality Assessment")
         st.caption(
@@ -390,10 +452,18 @@ if st.session_state.pipeline_results:
         )
         st.markdown(critic_text)
 
-    # 3. Search Intel Tab
+    # -------------------------------------------------------------------------
+    # 4. Search Intel Tab
+    # -------------------------------------------------------------------------
     with tab_search:
         st.subheader("🔍 Search Agent Findings")
         st.caption("Live web queries and snippets returned by the Tavily search engine.")
+        if tavily_urls:
+            st.markdown("**Discovered URLs:**")
+            for u in tavily_urls:
+                st.markdown(f"- [{u}]({u})")
+            st.divider()
+
         st.text_area(
             "Raw Search Agent Output",
             value=search_text,
@@ -401,10 +471,14 @@ if st.session_state.pipeline_results:
             disabled=True,
         )
 
-    # 4. Reader Agent Tab
+    # -------------------------------------------------------------------------
+    # 5. Reader Agent Tab
+    # -------------------------------------------------------------------------
     with tab_scraped:
         st.subheader("📖 Reader Agent Extracted Content")
-        st.caption("Main article text scraped and parsed from the most relevant source.")
+        if scraped_url:
+            st.info(f"Target Scraped URL: [{scraped_url}]({scraped_url})")
+
         st.text_area(
             "Extracted Web Content",
             value=scraped_text,

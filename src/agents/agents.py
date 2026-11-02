@@ -15,7 +15,7 @@ llm = ChatGoogleGenerativeAI(
 
 search_system_prompt = (
     "You are a search agent. Your job is to search the web for relevant, high-quality, "
-    "and up-to-date information on the given topic and return comprehensive results."
+    "and up-to-date information on the given topic and return comprehensive results along with source URLs."
 )
 
 
@@ -41,18 +41,28 @@ def build_reader_agent():
 
 # Writer chain
 writer_prompt = ChatPromptTemplate.from_messages([
-    ("system", "You are an expert research writer. Write clear, structured and insightful reports."),
-    ("human", """Write a detailed search report on the topic below.
-    topic: {topic}
-    research gathered: {research}
-    structured the report as 
-    - Introduction
-    - Key Findings
-    - Details
-    - Conclusion
-    - sources (list all the urls found in research)
-    be detailed factual and professional
-    """)
+    ("system", "You are an expert research writer. Write clear, structured, and insightful reports with thorough source citations."),
+    ("human", """Write a detailed, professional research report on the topic below.
+
+Topic: {topic}
+
+Research Data & Discovered URLs:
+{research}
+
+Structure the report with the following markdown headings:
+# [Report Title]
+## Executive Summary
+## Key Findings
+## In-Depth Analysis
+## Conclusion
+## Sources & References
+
+CRITICAL RULES FOR CITATIONS:
+- In the 'Sources & References' section, you MUST list the URLs found in the research data above as numbered clickable markdown links (e.g. `1. [Source Title or Website Name](https://...)`).
+- Clearly highlight the primary URL that was scraped for deep content.
+- Never omit the URLs or write placeholders.
+- Be detailed, factual, objective, and professional.
+""")
 ])        
 
 writer_chain = writer_prompt | llm | StrOutputParser()
