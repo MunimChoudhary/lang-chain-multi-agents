@@ -8,6 +8,7 @@ if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 from src.agents.agents import build_search_agent, build_reader_agent, writer_chain, critic_chain
+from src.tools.tools import web_search, scrape_url
 
 
 def _get_text(content) -> str:
@@ -25,60 +26,49 @@ def _get_text(content) -> str:
     return str(content)
 
 
-def _extract_all_urls(messages) -> list[str]:
-    """Extract unique HTTP/HTTPS URLs from all messages and tool outputs."""
+def _extract_all_urls(data) -> list[str]:
+    """Extract unique HTTP/HTTPS URLs from messages, tool calls, or text strings."""
     urls = []
     url_pattern = re.compile(r"https?://[^\s\)\"\'\<\>]+", re.IGNORECASE)
 
-    for msg in messages:
-        # Check direct message content
-        content = getattr(msg, "content", "")
-        text = _get_text(content)
-        for match in url_pattern.findall(text):
+    if isinstance(data, str):
+        for match in url_pattern.findall(data):
             cleaned = match.rstrip(".,;\"')]>")
             if cleaned not in urls:
                 urls.append(cleaned)
+        return urls
 
-        # Check tool calls parameters
-        tool_calls = getattr(msg, "tool_calls", None)
-        if tool_calls:
-            for tc in tool_calls:
-                args = tc.get("args", {})
-                for v in args.values():
-                    if isinstance(v, str):
-                        for match in url_pattern.findall(v):
-                            cleaned = match.rstrip(".,;\"')]>")
-                            if cleaned not in urls:
-                                urls.append(cleaned)
+    if isinstance(data, list):
+        for msg in data:
+            if isinstance(msg, str):
+                for match in url_pattern.findall(msg):
+                    cleaned = match.rstrip(".,;\"')]>")
+                    if cleaned not in urls:
+                        urls.append(cleaned)
+            else:
+                content = getattr(msg, "content", "")
+                text = _get_text(content)
+                for match in url_pattern.findall(text):
+                    cleaned = match.rstrip(".,;\"')]>")
+                    if cleaned not in urls:
+                        urls.append(cleaned)
+
+                tool_calls = getattr(msg, "tool_calls", None)
+                if tool_calls:
+                    for tc in tool_calls:
+                        args = tc.get("args", {})
+                        for v in args.values():
+                            if isinstance(v, str):
+                                for match in url_pattern.findall(v):
+                                    cleaned = match.rstrip(".,;\"')]>")
+                                    if cleaned not in urls:
+                                        urls.append(cleaned)
     return urls
-
-
-def _extract_scraped_url(messages, fallback_urls: list[str] = None) -> str:
-    """Find the specific URL passed to scrape_url tool call."""
-    for msg in messages:
-        tool_calls = getattr(msg, "tool_calls", None)
-        if tool_calls:
-            for tc in tool_calls:
-                if tc.get("name") == "scrape_url":
-                    url = tc.get("args", {}).get("url")
-                    if url:
-                        return url.strip()
-
-    # Fallback to any URL found in reader agent messages
-    urls = _extract_all_urls(messages)
-    if urls:
-        return urls[0]
-
-    # Fallback to the first available URL from search
-    if fallback_urls and len(fallback_urls) > 0:
-        return fallback_urls[0]
-
-    return "https://en.wikipedia.org"
 
 
 def run_research_pipeline(topic: str, on_step_callback=None) -> dict:
     """
-    Execute the multi-agent research pipeline.
+    Execute the multi-agent research pipeline with guaranteed URL discovery and scraping.
 
     Args:
         topic (str): The research topic.
@@ -89,7 +79,7 @@ def run_research_pipeline(topic: str, on_step_callback=None) -> dict:
         dict: The final pipeline state containing all agent outputs and URLs.
     """
     state = {}
-    
+
     # -------------------------------------------------------------------------
     # Step 1: Search Agent
     # -------------------------------------------------------------------------
@@ -98,18 +88,29 @@ def run_research_pipeline(topic: str, on_step_callback=None) -> dict:
     print("=" * 50, flush=True)
 
     search_agent = build_search_agent()
-    search_result = search_agent.invoke({
-        "messages": [("user", f"find recent, detailed and reliable information about {topic}. Make sure to include relevant source URLs.")]
-    })
+    search_prompt = (
+        f"Search the web using the web_search tool for comprehensive, reliable, and up-to-date "
+        f"information about {topic}. You MUST use the web_search tool to find real web results and URLs."
+    )
+    search_result = search_agent.invoke({"messages": [("user", search_prompt)]})
 
     search_messages = search_result.get("messages", [])
-    state["search_results"] = _get_text(search_messages[-1].content)
-    
-    # Extract all discovered URLs from Tavily results
-    state["tavily_urls"] = _extract_all_urls(search_messages)
+    agent_output = _get_text(search_messages[-1].content) if search_messages else ""
+    tavily_urls = _extract_all_urls(search_messages)
 
-    print("\nsearch result:\n", state["search_results"], flush=True)
-    print("\nDiscovered Tavily URLs:\n", state["tavily_urls"], flush=True)
+    # GUARANTEE: If LLM didn't invoke the search tool or returned no URLs, invoke Tavily directly
+    if not tavily_urls or len(tavily_urls) == 0:
+        print("Ensuring live Tavily URLs via direct tool query...", flush=True)
+        raw_tavily = web_search.invoke({"query": topic})
+        tavily_urls = _extract_all_urls(raw_tavily)
+        agent_output = f"{agent_output}\n\n### Discovered Sources & Search Results:\n{raw_tavily}"
+
+    state["search_results"] = agent_output
+    state["tavily_urls"] = tavily_urls
+
+    print(f"\nDiscovered Tavily URLs ({len(tavily_urls)}):", flush=True)
+    for u in tavily_urls:
+        print(f"  - {u}", flush=True)
 
     if on_step_callback:
         on_step_callback("search", state["search_results"], urls=state["tavily_urls"])
@@ -121,26 +122,48 @@ def run_research_pipeline(topic: str, on_step_callback=None) -> dict:
     print("Step 2 - Reader agent is working...!", flush=True)
     print("=" * 50, flush=True)
 
-    # Provide URLs explicitly to reader agent
-    urls_prompt = "\n".join([f"- {u}" for u in state["tavily_urls"][:5]])
+    # Pick the most authoritative non-video URL to scrape
+    target_url = None
+    for u in state["tavily_urls"]:
+        if "youtube.com" not in u and "youtu.be" not in u:
+            target_url = u
+            break
+    if not target_url and state["tavily_urls"]:
+        target_url = state["tavily_urls"][0]
+    if not target_url:
+        target_url = f"https://en.wikipedia.org/wiki/{topic.strip().replace(' ', '_')}"
+
     reader_prompt = (
-        f"Based on the following search results about {topic}, pick the most authoritative and informative URL "
-        f"from the list and use scrape_url to fetch its full content.\n\n"
-        f"Available URLs:\n{urls_prompt}\n\n"
-        f"Search Summary:\n{state['search_results'][:800]}"
+        f"You are the Reader Agent. You MUST use the scrape_url tool on this exact URL:\n"
+        f"{target_url}\n"
+        f"Scrape its webpage content and provide a detailed analysis of what you read."
     )
 
     reader_agent = build_reader_agent()
-    reader_result = reader_agent.invoke({
-        "messages": [("user", reader_prompt)]
-    })
+    reader_result = reader_agent.invoke({"messages": [("user", reader_prompt)]})
 
     reader_messages = reader_result.get("messages", [])
-    state["scraped_content"] = _get_text(reader_messages[-1].content)
-    state["scraped_url"] = _extract_scraped_url(reader_messages, fallback_urls=state["tavily_urls"])
+    scraped_content = ""
 
-    print("\nScraped URL:\n", state["scraped_url"], flush=True)
-    print("\nScraped content:\n", state["scraped_content"][:300] + "...", flush=True)
+    # Look for ToolMessage content
+    for msg in reader_messages:
+        if type(msg).__name__ == "ToolMessage" or getattr(msg, "name", "") == "scrape_url":
+            scraped_content = _get_text(msg.content)
+            break
+
+    # If ToolMessage was empty or short, fallback to last agent message or direct scrape
+    if not scraped_content or len(scraped_content.strip()) < 100:
+        if reader_messages:
+            scraped_content = _get_text(reader_messages[-1].content)
+        if not scraped_content or len(scraped_content.strip()) < 100:
+            print(f"Scraping {target_url} directly to guarantee full text...", flush=True)
+            scraped_content = scrape_url.invoke({"url": target_url})
+
+    state["scraped_url"] = target_url
+    state["scraped_content"] = scraped_content
+
+    print(f"\nScraped URL: {state['scraped_url']}", flush=True)
+    print(f"Scraped content length: {len(state['scraped_content'])} characters", flush=True)
 
     if on_step_callback:
         on_step_callback("reader", state["scraped_content"], scraped_url=state["scraped_url"])
@@ -153,24 +176,22 @@ def run_research_pipeline(topic: str, on_step_callback=None) -> dict:
     print("=" * 50, flush=True)
 
     # Compile structured research package with explicit URLs
-    tavily_sources_str = "\n".join([f"- {u}" for u in state["tavily_urls"]]) if state["tavily_urls"] else "None found"
+    sources_list = "\n".join([f"{idx}. {u}" for idx, u in enumerate(state["tavily_urls"], 1)])
     research_combined = (
-        f"--- GATHERED SOURCE URLS (FROM TAVILY SEARCH) ---\n"
-        f"{tavily_sources_str}\n\n"
-        f"--- PRIMARY DEEP-SCRAPED SOURCE URL ---\n"
-        f"{state['scraped_url']}\n\n"
-        f"--- SEARCH INTELLIGENCE SUMMARY ---\n"
-        f"{state['search_results']}\n\n"
-        f"--- IN-DEPTH SCRAPED WEBPAGE CONTENT ---\n"
-        f"{state['scraped_content']}"
+        f"===================================================================\n"
+        f"MANDATORY REFERENCE URLS (YOU MUST CITE THESE IN THE FINAL REPORT):\n"
+        f"Primary Deep-Scraped Source URL: {state['scraped_url']}\n\n"
+        f"All Discovered Reference URLs:\n{sources_list}\n"
+        f"===================================================================\n\n"
+        f"--- GATHERED SEARCH INTELLIGENCE ---\n{state['search_results']}\n\n"
+        f"--- IN-DEPTH SCRAPED WEBPAGE CONTENT (FROM {state['scraped_url']}) ---\n{state['scraped_content'][:10000]}"
     )
 
     state["report"] = _get_text(writer_chain.invoke({
-        "topic": topic,        
+        "topic": topic,
         "research": research_combined
-    }))    
-    
-    print("\n" + " = " * 50, flush=True)
+    }))
+
     print("\nfinal report:\n", state["report"], flush=True)
 
     if on_step_callback:
@@ -185,9 +206,8 @@ def run_research_pipeline(topic: str, on_step_callback=None) -> dict:
 
     state["feedback"] = _get_text(critic_chain.invoke({
         "report": state["report"]
-    }))    
-    
-    print("\n" + " = " * 50, flush=True)
+    }))
+
     print("\nCritic report:\n", state["feedback"], flush=True)
 
     if on_step_callback:

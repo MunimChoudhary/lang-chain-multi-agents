@@ -126,6 +126,9 @@ if "pipeline_results" not in st.session_state:
 if "research_topic" not in st.session_state:
     st.session_state.research_topic = "Advancements in Autonomous AI Agents and Multi-Agent Systems"
 
+if "topic_input_box" not in st.session_state:
+    st.session_state["topic_input_box"] = st.session_state.research_topic
+
 if "execution_time" not in st.session_state:
     st.session_state.execution_time = 0
 
@@ -133,6 +136,7 @@ if "execution_time" not in st.session_state:
 # Helper to preset topic from suggestions
 def select_topic(topic_text: str):
     st.session_state.research_topic = topic_text
+    st.session_state["topic_input_box"] = topic_text
 
 
 # Helper to parse critic score
@@ -229,21 +233,21 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# Research Input Bar
-with st.container():
+# Research Input Form (enables Enter key to submit)
+with st.form(key="research_form", border=False):
     topic_input = st.text_input(
         "Enter your research topic or question:",
-        value=st.session_state.research_topic,
-        placeholder="e.g. Current trends in renewable energy storage...",
+        key="topic_input_box",
+        placeholder="Type your research topic and press Enter (or click Dispatch Agents)...",
         label_visibility="collapsed",
     )
 
     col1, col2, col3 = st.columns([2, 1, 3])
     with col1:
-        run_button = st.button("🚀 Dispatch Agents", type="primary", use_container_width=True)
+        run_button = st.form_submit_button("🚀 Dispatch Agents", type="primary", use_container_width=True)
     with col2:
         if st.session_state.pipeline_results is not None:
-            if st.button("🧹 Clear Results", use_container_width=True):
+            if st.form_submit_button("🧹 Clear Results", use_container_width=True):
                 st.session_state.pipeline_results = None
                 st.rerun()
 
@@ -387,6 +391,11 @@ if st.session_state.pipeline_results:
         if scraped_url:
             st.info(f"📍 **Deep-Scraped Primary Source:** [{scraped_url}]({scraped_url})")
 
+        if tavily_urls:
+            with st.expander(f"🌐 All Reference Sources Discovered by Search ({len(tavily_urls)})", expanded=False):
+                for idx, u in enumerate(tavily_urls, 1):
+                    st.markdown(f"**{idx}.** [{u}]({u})")
+
         col_down, _ = st.columns([1, 4])
         with col_down:
             st.download_button(
@@ -411,27 +420,23 @@ if st.session_state.pipeline_results:
         if scraped_url and scraped_url != "N/A":
             st.markdown(
                 f"""
-                <div style="background: rgba(30,136,229,0.08); border-left: 4px solid #1E88E5; padding: 12px; border-radius: 6px; margin-bottom: 1.5rem;">
-                    <strong>Scraped URL:</strong> <a href="{scraped_url}" target="_blank" style="color: #1E88E5; word-break: break-all;">{scraped_url}</a>
-                    <br><small style="color: #888;">This webpage was selected by the Reader Agent for in-depth content extraction via Trafilatura.</small>
+                <div style="background: rgba(30,136,229,0.08); border-left: 4px solid #1E88E5; padding: 14px; border-radius: 8px; margin-bottom: 1.5rem;">
+                    <strong>Scraped URL:</strong> <a href="{scraped_url}" target="_blank" style="color: #1E88E5; word-break: break-all; font-size: 1.05rem;">{scraped_url}</a>
+                    <br><small style="color: #888;">This webpage was selected by the Reader Agent and deeply extracted with Trafilatura.</small>
                 </div>
                 """,
                 unsafe_allow_html=True,
             )
         else:
-            st.write("No specific URL scraped.")
+            st.warning("No specific URL was scraped.")
 
         # Tavily Discovered URLs
         st.markdown(f"#### 🌐 All URLs Discovered by Tavily Search ({len(tavily_urls)})")
         if tavily_urls:
             for idx, url in enumerate(tavily_urls, 1):
-                col_num, col_link = st.columns([1, 15])
-                with col_num:
-                    st.markdown(f"**{idx}.**")
-                with col_link:
-                    st.markdown(f"[{url}]({url})")
+                st.markdown(f"**{idx}.** [{url}]({url})")
         else:
-            st.write("No external URLs returned.")
+            st.info("No external URLs returned.")
 
     # -------------------------------------------------------------------------
     # 3. Critic Review Tab
