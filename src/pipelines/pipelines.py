@@ -24,8 +24,19 @@ def _get_text(content) -> str:
     return str(content)
 
 
-def run_research_pipeline(topic: str) -> dict:
+def run_research_pipeline(topic: str, on_step_callback=None) -> dict:
+    """
+    Execute the multi-agent research pipeline.
 
+    Args:
+        topic (str): The research topic.
+        on_step_callback (callable, optional): Callback function invoked after each step:
+            callback(step_id: str, content: str)
+            step_id can be "search", "reader", "writer", or "critic".
+
+    Returns:
+        dict: The final pipeline state containing all agent outputs.
+    """
     state = {}
     
     # Step 1: Search agent
@@ -40,6 +51,8 @@ def run_research_pipeline(topic: str) -> dict:
 
     state["search_results"] = _get_text(search_result["messages"][-1].content)
     print("\nsearch result:\n", state["search_results"], flush=True)
+    if on_step_callback:
+        on_step_callback("search", state["search_results"])
 
     # Step 2: Reader agent
     print("\n" + " = " * 50, flush=True)
@@ -57,6 +70,8 @@ def run_research_pipeline(topic: str) -> dict:
 
     state["scraped_content"] = _get_text(reader_result["messages"][-1].content)
     print("\nscraped content:\n", state["scraped_content"], flush=True)
+    if on_step_callback:
+        on_step_callback("reader", state["scraped_content"])
 
     # Step 3: Writer agent
     print("\n" + " = " * 50, flush=True)
@@ -75,6 +90,8 @@ def run_research_pipeline(topic: str) -> dict:
     
     print("\n" + " = " * 50, flush=True)
     print("\nfinal report:\n", state["report"], flush=True)
+    if on_step_callback:
+        on_step_callback("writer", state["report"])
 
     # Step 4: Critic agent
     print("\n" + " = " * 50, flush=True)
@@ -87,5 +104,7 @@ def run_research_pipeline(topic: str) -> dict:
     
     print("\n" + " = " * 50, flush=True)
     print("\nCritic report:\n", state["feedback"], flush=True)
+    if on_step_callback:
+        on_step_callback("critic", state["feedback"])
 
     return state
